@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#2a6df4" />
+    <title>报工助手</title>
+    <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+    <div class="app-container" id="app">
+        <!-- ===== 顶部 ===== -->
+        <header class="app-header">
+            <div class="app-brand">
+                <div class="logo">⏱</div>
+                <h1>报工<span>助手</span></h1>
+            </div>
+            <div class="header-actions">
+                <button class="btn btn-jump btn-sm" onclick="quickJump()">🚀 一键跳转</button>
+                <button class="btn btn-outline btn-sm" onclick="openSettingsModal()">⚙️ 设置</button>
+            </div>
+        </header>
+
+        <!-- ===== Tab 导航 ===== -->
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="tab-main">📋 报工计时</button>
+            <button class="tab-btn" data-tab="tab-models">📦 型号管理</button>
+        </div>
+
+        <!-- ===== TAB 1: 主界面 ===== -->
+        <div class="tab-panel active" id="tab-main">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="modelSelect">选择型号</label>
+                    <select id="modelSelect">
+                        <option value="">— 请先添加型号 —</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="workNumber">工件编号（可选）</label>
+                    <input type="text" id="workNumber" placeholder="例如：0001" />
+                </div>
+                <div class="form-actions">
+                    <button class="btn btn-primary" onclick="startWork()">▶ 开工</button>
+                    <button class="btn btn-outline btn-sm" onclick="clearAllRecords()" style="color:#b91c1c;flex:0.5;">清空</button>
+                </div>
+            </div>
+
+            <div class="segment-control">
+                <button class="segment-btn active" data-view="active" onclick="switchView('active')">⏳ 进行中</button>
+                <button class="segment-btn" data-view="done" onclick="switchView('done')">✅ 已报工</button>
+            </div>
+
+            <div class="flex-between" style="margin-bottom:10px;">
+                <h2 style="font-size:17px;font-weight:600;color:#0b1a33;" id="listTitle">⏳ 进行中的工件</h2>
+                <span class="text-muted" id="recordCount">共 0 个</span>
+            </div>
+
+            <div id="recordsContainer">
+                <div class="empty-state">
+                    <div class="empty-icon">📭</div>
+                    <p id="emptyText">暂无进行中的工件，选择型号后点击「开工」开始计时</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== TAB 2: 型号管理 ===== -->
+        <div class="tab-panel" id="tab-models">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="modelNameInput">型号名称</label>
+                    <input type="text" id="modelNameInput" placeholder="例如: 型号A" />
+                </div>
+                <div class="form-group">
+                    <label for="modelDurationInput">工时定额（分钟）</label>
+                    <input type="number" id="modelDurationInput" placeholder="1" min="1" />
+                </div>
+                <div class="form-actions">
+                    <button class="btn btn-success" onclick="addModel()">➕ 添加</button>
+                </div>
+            </div>
+
+            <h2 style="font-size:17px;font-weight:600;color:#0b1a33;margin-bottom:10px;">📋 型号列表</h2>
+            <div id="modelsContainer">
+                <div class="empty-state">
+                    <div class="empty-icon">📦</div>
+                    <p>暂无型号，请添加</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== 设置弹窗 ===== -->
+    <div class="modal-overlay" id="settingsModal">
+        <div class="modal">
+            <h3>⚙️ 设置</h3>
+            <p>配置报工窗口浮动比例与跳转地址</p>
+
+            <div class="form-group setting-block">
+                <label for="windowPercentInput">报工窗口浮动比例（上下各浮动）</label>
+                <div class="input-with-unit">
+                    <input type="number" id="windowPercentInput" min="0" max="100" step="1" placeholder="20" />
+                    <span class="unit">%</span>
+                </div>
+                <span class="field-hint">
+                    以工时为中心，前后各浮动该比例。<br />
+                    例：工时 100 分钟、浮动 20% → 最早第 80 分钟、最晚第 120 分钟可报工。
+                </span>
+                <div class="preset-chips" id="percentPresets">
+                    <button type="button" class="chip" data-pct="5" onclick="setPercentPreset(5)">5%</button>
+                    <button type="button" class="chip" data-pct="10" onclick="setPercentPreset(10)">10%</button>
+                    <button type="button" class="chip" data-pct="20" onclick="setPercentPreset(20)">20%</button>
+                    <button type="button" class="chip" data-pct="30" onclick="setPercentPreset(30)">30%</button>
+                    <button type="button" class="chip" data-pct="50" onclick="setPercentPreset(50)">50%</button>
+                </div>
+            </div>
+
+            <div class="form-group setting-block">
+                <label for="jumpUrlInput">跳转地址</label>
+                <input type="text" id="jumpUrlInput" placeholder="例如: welink:// 或 https://..." />
+                <span class="field-hint">报工成功后自动跳转的地址（URL Scheme 或 网页链接）</span>
+            </div>
+
+            <button type="button" class="btn btn-tutorial btn-block" onclick="openTutorialModal()">
+                📖 报工链接获取方式
+            </button>
+
+            <div class="form-actions">
+                <button class="btn btn-outline" onclick="closeSettingsModal()">取消</button>
+                <button class="btn btn-primary" onclick="saveSettings()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== 教程弹窗 ===== -->
+    <div class="modal-overlay" id="tutorialModal">
+        <div class="modal">
+            <div class="tut-header">
+                <div class="tut-icon">📖</div>
+                <h3>报工链接获取方式</h3>
+            </div>
+            <div class="tut-sub">跟着做，6 步拿到专属跳转链接</div>
+
+            <div class="tut-steps">
+                <div class="tut-step">
+                    <div class="step-num">1</div>
+                    <div class="step-body">
+                        <div class="step-title">打开 Welink 报工平台</div>
+                        <div class="step-desc">在 Welink 中找到并进入报工平台首页。</div>
+                    </div>
+                </div>
+                <div class="tut-step">
+                    <div class="step-num">2</div>
+                    <div class="step-body">
+                        <div class="step-title">分享报工平台</div>
+                        <div class="step-desc">
+                            点击右上角 <span class="kbd">⋯</span> → 点<span class="em-primary">分享</span>，
+                            分享给自己的 Welink 账号。
+                        </div>
+                    </div>
+                </div>
+                <div class="tut-step">
+                    <div class="step-num">3</div>
+                    <div class="step-body">
+                        <div class="step-title">进入扫码报工界面并再次分享</div>
+                        <div class="step-desc">
+                            打开自己账号里分享的链接，选择好自己对应工序的报工选项，
+                            到<span class="em-primary">扫码报工</span>的界面，点击右上角
+                            <span class="kbd">⋯</span> 分享给自己的 Welink 账号。
+                        </div>
+                    </div>
+                </div>
+                <div class="tut-step">
+                    <div class="step-num">4</div>
+                    <div class="step-body">
+                        <div class="step-title">断网后复制真实链接</div>
+                        <div class="step-desc">
+                            点击打开刚才分享的报工界面链接后，先
+                            <span class="em-danger">关闭手机的网络</span>，再点击右上角
+                            <span class="kbd">⋯</span> → <span class="em-primary">系统浏览器</span>。
+                            此时跳转到浏览器会显示网络异常，复制此时的链接，这个就是跳转的链接。
+                        </div>
+                    </div>
+                </div>
+                <div class="tut-step">
+                    <div class="step-num">5</div>
+                    <div class="step-body">
+                        <div class="step-title">粘贴链接到报工助手</div>
+                        <div class="step-desc">
+                            粘贴刚复制的链接到报工助手的设置里，
+                            填入「<span class="em-primary">跳转地址</span>」后保存。
+                        </div>
+                    </div>
+                </div>
+                <div class="tut-step">
+                    <div class="step-num">6</div>
+                    <div class="step-body">
+                        <div class="step-title">验证跳转</div>
+                        <div class="step-desc">
+                            点击顶部的「<span class="em-primary">🚀 一键跳转</span>」，
+                            验证一下是否可以正常跳转。
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tut-tip">
+                <span class="tip-icon">💡</span>
+                <span>第 4 步是关键：必须先断网，再通过「系统浏览器」打开，才能拿到真正的跳转链接。</span>
+            </div>
+
+            <div class="form-actions">
+                <button class="btn btn-primary" onclick="closeTutorialModal()">我知道了</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== 可报工自动提醒弹窗 ===== -->
+    <div class="modal-overlay" id="readyPopup">
+        <div class="modal">
+            <h3 id="readyPopupTitle">⏰ 有工件可以报工啦</h3>
+            <p>以下工件已进入报工时间窗口，请及时报工</p>
+            <div id="readyPopupList" class="ready-popup-list"></div>
+            <div class="form-actions" style="flex-direction:column;gap:10px;">
+                <button class="btn btn-success btn-block btn-batch-all" onclick="batchFinishAll()">
+                    ✅ 一键全报（全部标记为已报工并跳转）
+                </button>
+                <button class="btn btn-outline btn-block" onclick="closeReadyPopup()">稍后再说</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
