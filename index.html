@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="theme-color" content="#2a6df4" />
+    <meta name="theme-color" content="#F5A800" />
     <title>报工助手</title>
     <link rel="stylesheet" href="styles.css" />
 </head>
@@ -19,6 +19,7 @@
             <div class="header-actions">
                 <button class="btn btn-jump btn-sm" onclick="quickJump()">🚀 一键跳转</button>
                 <button class="btn btn-outline btn-sm" onclick="openSettingsModal()">⚙️ 设置</button>
+                <button class="btn btn-outline btn-sm btn-theme" id="themeToggle" onclick="toggleTheme()" title="切换深色/浅色">🌙</button>
             </div>
         </header>
 
@@ -43,7 +44,7 @@
                 </div>
                 <div class="form-actions">
                     <button class="btn btn-primary" onclick="startWork()">▶ 开工</button>
-                    <button class="btn btn-outline btn-sm" onclick="clearAllRecords()" style="color:#b91c1c;flex:0.5;">清空</button>
+                    <button class="btn btn-outline btn-sm" onclick="clearAllRecords()" style="color:var(--danger-dark);flex:0.5;">清空</button>
                 </div>
             </div>
 
@@ -53,8 +54,13 @@
             </div>
 
             <div class="flex-between" style="margin-bottom:10px;">
-                <h2 style="font-size:17px;font-weight:600;color:#0b1a33;" id="listTitle">⏳ 进行中的工件</h2>
+                <h2 style="font-size:17px;font-weight:600;color:var(--text);" id="listTitle">⏳ 进行中的工件</h2>
                 <span class="text-muted" id="recordCount">共 0 个</span>
+            </div>
+
+            <div id="exportBar" class="export-bar" style="display:none;">
+                <button class="btn btn-outline btn-sm" onclick="exportExcel()">📥 导出今日 Excel</button>
+                <button class="btn btn-outline btn-sm" onclick="exportAllExcel()">📤 导出全部记录</button>
             </div>
 
             <div id="recordsContainer">
@@ -81,7 +87,7 @@
                 </div>
             </div>
 
-            <h2 style="font-size:17px;font-weight:600;color:#0b1a33;margin-bottom:10px;">📋 型号列表</h2>
+            <h2 style="font-size:17px;font-weight:600;color:var(--text);margin-bottom:10px;">📋 型号列表</h2>
             <div id="modelsContainer">
                 <div class="empty-state">
                     <div class="empty-icon">📦</div>

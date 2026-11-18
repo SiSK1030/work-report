@@ -110,6 +110,9 @@ function switchView(view) {
     document.querySelectorAll('.segment-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.view === view);
     });
+    // 「已报工」视图才显示导出工具栏
+    const exportBar = document.getElementById('exportBar');
+    if (exportBar) exportBar.style.display = (view === 'done') ? 'flex' : 'none';
     renderRecords();
 }
 
@@ -739,11 +742,15 @@ function startTimer() {
 // ================================================================
 
 function init() {
+    initTheme();
     loadData();
     renderModels();
     renderModelSelect();
     renderRecords();
     startTimer();
+    // 初始视图为「进行中」，隐藏导出栏
+    const exportBar = document.getElementById('exportBar');
+    if (exportBar) exportBar.style.display = 'none';
 
     document.getElementById('modelNameInput').addEventListener('keydown', (e) => {
         if (e.key === 'Enter') addModel();
@@ -769,3 +776,250 @@ function init() {
 
 init();
 console.log('✅ 报工助手（今日工时统计 + 型号汇总）已启动');
+
+// ================================================================
+//  深色模式
+// ================================================================
+
+const STORAGE_KEY_THEME = 'worktime_theme';
+
+function applyTheme(theme) {
+    const root = document.documentElement;
+    if (theme === 'dark') {
+        root.setAttribute('data-theme', 'dark');
+    } else {
+        root.removeAttribute('data-theme');
+    }
+    const btn = document.getElementById('themeToggle');
+    if (btn) btn.textContent = (theme === 'dark') ? '☀️' : '🌙';
+    // 同步移动端浏览器地址栏颜色
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', theme === 'dark' ? '#12151a' : '#F5A800');
+}
+
+function initTheme() {
+    let saved = null;
+    try { saved = localStorage.getItem(STORAGE_KEY_THEME); } catch (e) {}
+    if (!saved) {
+        // 跟随系统偏好
+        const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        saved = prefersDark ? 'dark' : 'light';
+    }
+    applyTheme(saved);
+}
+
+function toggleTheme() {
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const next = isDark ? 'light' : 'dark';
+    applyTheme(next);
+    try { localStorage.setItem(STORAGE_KEY_THEME, next); } catch (e) {}
+}
+
+// ================================================================
+//  导出 Excel（零依赖生成真正的 .xlsx）
+// ================================================================
+
+// --- 极简 ZIP 写入器（store 模式，无压缩，Excel 可直接打开） ---
+function _crc32(bytes) {
+    let c, crc = 0xFFFFFFFF;
+    for (let i = 0; i < bytes.length; i++) {
+        c = (crc ^ bytes[i]) & 0xFF;
+        for (let k = 0; k < 8; k++) {
+            c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+        }
+        crc = (crc >>> 8) ^ c;
+    }
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+function _strToUtf8(str) {
+    return new TextEncoder().encode(str);
+}
+
+// files: [{name, content(string)}]
+function _buildZip(files) {
+    const enc = new TextEncoder();
+    const chunks = [];
+    const central = [];
+    let offset = 0;
+
+    function u16(n) { return new Uint8Array([n & 0xFF, (n >>> 8) & 0xFF]); }
+    function u32(n) { return new Uint8Array([n & 0xFF, (n >>> 8) & 0xFF, (n >>> 16) & 0xFF, (n >>> 24) & 0xFF]); }
+    function concat(arrs) {
+        let len = 0; arrs.forEach(a => len += a.length);
+        const out = new Uint8Array(len); let p = 0;
+        arrs.forEach(a => { out.set(a, p); p += a.length; });
+        return out;
+    }
+
+    files.forEach(f => {
+        const nameBytes = enc.encode(f.name);
+        const dataBytes = enc.encode(f.content);
+        const crc = _crc32(dataBytes);
+        const localHeader = concat([
+            u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0),
+            u32(crc), u32(dataBytes.length), u32(dataBytes.length),
+            u16(nameBytes.length), u16(0), nameBytes
+        ]);
+        chunks.push(localHeader, dataBytes);
+
+        const centralHeader = concat([
+            u32(0x02014b50), u16(20), u16(20), u16(0), u16(0), u16(0), u16(0),
+            u32(crc), u32(dataBytes.length), u32(dataBytes.length),
+            u16(nameBytes.length), u16(0), u16(0), u16(0), u16(0),
+            u32(0), u32(offset), nameBytes
+        ]);
+        central.push(centralHeader);
+        offset += localHeader.length + dataBytes.length;
+    });
+
+    const centralBytes = concat(central);
+    const endRecord = concat([
+        u32(0x06054b50), u16(0), u16(0), u16(files.length), u16(files.length),
+        u32(centralBytes.length), u32(offset), u16(0)
+    ]);
+    return concat([concat(chunks), centralBytes, endRecord]);
+}
+
+function _xmlEscape(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+}
+
+// 列号 -> 字母（1->A）
+function _colLetter(n) {
+    let s = '';
+    while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); }
+    return s;
+}
+
+// rows: 二维数组。第一行为表头（加粗）
+function _buildSheetXml(rows) {
+    let rowsXml = '';
+    rows.forEach((row, rIdx) => {
+        let cells = '';
+        row.forEach((val, cIdx) => {
+            const ref = _colLetter(cIdx + 1) + (rIdx + 1);
+            const isNum = typeof val === 'number' && isFinite(val);
+            const styleAttr = rIdx === 0 ? ' s="1"' : '';
+            if (isNum) {
+                cells += `<c r="${ref}"${styleAttr}><v>${val}</v></c>`;
+            } else {
+                cells += `<c r="${ref}"${styleAttr} t="inlineStr"><is><t xml:space="preserve">${_xmlEscape(val)}</t></is></c>`;
+            }
+        });
+        rowsXml += `<row r="${rIdx + 1}">${cells}</row>`;
+    });
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${rowsXml}</sheetData></worksheet>`;
+}
+
+function _buildXlsxBlob(rows, sheetName) {
+    const files = [
+        {
+            name: '[Content_Types].xml',
+            content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`
+        },
+        {
+            name: '_rels/.rels',
+            content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`
+        },
+        {
+            name: 'xl/workbook.xml',
+            content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${_xmlEscape(sheetName || 'Sheet1')}" sheetId="1" r:id="rId1"/></sheets></workbook>`
+        },
+        {
+            name: 'xl/_rels/workbook.xml.rels',
+            content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`
+        },
+        {
+            name: 'xl/styles.xml',
+            content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="center"/></xf><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="center"/></xf></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`
+        },
+        {
+            name: 'xl/worksheets/sheet1.xml',
+            content: _buildSheetXml(rows)
+        }
+    ];
+    const zipBytes = _buildZip(files);
+    return new Blob([zipBytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+
+function _downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+function _fmtDateTime(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function _recordsToRows(list) {
+    const header = ['型号', '工件编号', '工时定额(分钟)', '开工时间', '报工时间'];
+    const rows = [header];
+    list.forEach(r => {
+        rows.push([
+            r.modelName || '（已删除）',
+            (r.number || '').trim() || '无编号',
+            Number(r.duration) || 0,
+            _fmtDateTime(r.startTime),
+            _fmtDateTime(r.finishTime)
+        ]);
+    });
+    return rows;
+}
+
+function exportExcel() {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const todayEnd = todayStart + 86400000;
+    const todayDone = records.filter(r => {
+        if (!r.done || !r.finishTime) return false;
+        const t = new Date(r.finishTime).getTime();
+        return t >= todayStart && t < todayEnd;
+    }).sort((a, b) => new Date(a.finishTime) - new Date(b.finishTime));
+
+    if (todayDone.length === 0) { alert('今天还没有报工记录可导出'); return; }
+
+    const rows = _recordsToRows(todayDone);
+    const totalHours = todayDone.reduce((s, r) => s + (Number(r.duration) || 0), 0);
+    rows.push([]);
+    rows.push(['今日合计', `${todayDone.length} 个工件`, totalHours, '', '']);
+
+    const pad = n => String(n).padStart(2, '0');
+    const dateStr = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
+    const blob = _buildXlsxBlob(rows, '今日报工');
+    _downloadBlob(blob, `报工记录_今日_${dateStr}.xlsx`);
+}
+
+function exportAllExcel() {
+    const done = records.filter(r => r.done && r.finishTime)
+        .sort((a, b) => new Date(a.finishTime) - new Date(b.finishTime));
+    if (done.length === 0) { alert('还没有任何已报工记录可导出'); return; }
+
+    const rows = _recordsToRows(done);
+    const totalHours = done.reduce((s, r) => s + (Number(r.duration) || 0), 0);
+    rows.push([]);
+    rows.push(['全部合计', `${done.length} 个工件`, totalHours, '', '']);
+
+    const now = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    const dateStr = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
+    const blob = _buildXlsxBlob(rows, '全部报工记录');
+    _downloadBlob(blob, `报工记录_全部_${dateStr}.xlsx`);
+}
